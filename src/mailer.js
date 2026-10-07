@@ -1,28 +1,18 @@
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 
-// ─── Transporter ──────────────────────────────────────────────────────────────
+// ─── Client ───────────────────────────────────────────────────────────────────
 
-// Use explicit SMTP settings instead of the `service: "gmail"` shorthand.
-// Port 465 (SSL) is often blocked on cloud hosts like Render; port 587 (STARTTLS)
-// is the reliable alternative.
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false, // false = STARTTLS (upgrades after connection)
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS, // Gmail App Password (NOT your normal password)
-  },
-});
+// Resend uses an HTTP API — no SMTP ports needed, works everywhere including
+// Render.com which blocks outbound SMTP (ports 25, 465, 587).
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Verify SMTP connection once at startup — not on every request.
-transporter.verify((error) => {
-  if (error) {
-    console.error("❌  SMTP connection failed:", error.message);
-  } else {
-    console.log("✅  SMTP connection verified — ready to send emails.");
-  }
-});
+// Warn at startup if the API key is missing.
+if (!process.env.RESEND_API_KEY) {
+  console.error("❌  RESEND_API_KEY is not set — emails will fail.");
+} else {
+  console.log("✅  Resend client initialised — ready to send emails.");
+}
+
 
 // ─── Email Templates ──────────────────────────────────────────────────────────
 
@@ -31,9 +21,9 @@ transporter.verify((error) => {
  */
 function buildNotificationEmail({ name, email, message }) {
   return {
-    from: `"Portfolio Contact" <${process.env.EMAIL_USER}>`,
-    to: process.env.EMAIL_TO,
-    replyTo: email,
+    from: process.env.RESEND_FROM_EMAIL,
+    to: [process.env.EMAIL_TO],
+    reply_to: email,
     subject: `📬 New message from ${name} — Portfolio Contact`,
     html: `
       <!DOCTYPE html>
@@ -117,8 +107,8 @@ function buildNotificationEmail({ name, email, message }) {
  */
 function buildAutoReplyEmail({ name, email }) {
   return {
-    from: `"Kanhaiya Yadav" <${process.env.EMAIL_USER}>`,
-    to: email,
+    from: process.env.RESEND_FROM_EMAIL,
+    to: [email],
     subject: `Got your message, ${name}! — Kanhaiya Yadav`,
     html: `
       <!DOCTYPE html>
@@ -200,10 +190,14 @@ function buildAutoReplyEmail({ name, email }) {
  * @param {{ name: string, email: string, message: string }} data
  */
 async function sendContactEmail(data) {
-  await Promise.all([
-    transporter.sendMail(buildNotificationEmail(data)),
-    transporter.sendMail(buildAutoReplyEmail(data)),
+  const [notification, autoReply] = await Promise.all([
+    resend.emails.send(buildNotificationEmail(data)),
+    resend.emails.send(buildAutoReplyEmail(data)),
   ]);
+
+  // Resend returns errors as values rather than throwing — surface them.
+  if (notification.error) throw new Error(notification.error.message);
+  if (autoReply.error) throw new Error(autoReply.error.message);
 }
 
 module.exports = { sendContactEmail };
