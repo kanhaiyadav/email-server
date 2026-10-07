@@ -7,6 +7,10 @@ const { sendContactEmail } = require("./mailer");
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust Render.com's reverse proxy so express-rate-limit can read the real
+// client IP from the X-Forwarded-For header instead of the proxy's IP.
+app.set("trust proxy", 1);
+
 // ─── Middleware ────────────────────────────────────────────────────────────────
 
 app.use(
