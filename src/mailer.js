@@ -2,12 +2,26 @@ const nodemailer = require("nodemailer");
 
 // ─── Transporter ──────────────────────────────────────────────────────────────
 
+// Use explicit SMTP settings instead of the `service: "gmail"` shorthand.
+// Port 465 (SSL) is often blocked on cloud hosts like Render; port 587 (STARTTLS)
+// is the reliable alternative.
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false, // false = STARTTLS (upgrades after connection)
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS, // Gmail App Password (NOT your normal password)
   },
+});
+
+// Verify SMTP connection once at startup — not on every request.
+transporter.verify((error) => {
+  if (error) {
+    console.error("❌  SMTP connection failed:", error.message);
+  } else {
+    console.log("✅  SMTP connection verified — ready to send emails.");
+  }
 });
 
 // ─── Email Templates ──────────────────────────────────────────────────────────
@@ -186,8 +200,6 @@ function buildAutoReplyEmail({ name, email }) {
  * @param {{ name: string, email: string, message: string }} data
  */
 async function sendContactEmail(data) {
-  await transporter.verify(); // throws if credentials are wrong
-
   await Promise.all([
     transporter.sendMail(buildNotificationEmail(data)),
     transporter.sendMail(buildAutoReplyEmail(data)),
