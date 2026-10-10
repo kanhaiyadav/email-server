@@ -4,6 +4,34 @@ const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const { sendContactEmail } = require("./mailer");
 
+// ─── Turnstile Verification ────────────────────────────────────────────────────
+
+async function verifyTurnstileToken(token, remoteip) {
+  const secret = process.env.TURNSTILE_SECRET_KEY;
+  if (!secret) {
+    console.warn("⚠️  TURNSTILE_SECRET_KEY not set — skipping verification (dev mode)");
+    return true; // Allow through when no secret is configured (local dev only)
+  }
+
+  const formData = new URLSearchParams();
+  formData.append("secret", secret);
+  formData.append("response", token);
+  if (remoteip) formData.append("remoteip", remoteip);
+
+  try {
+    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formData.toString(),
+    });
+    const data = await res.json();
+    return data.success === true;
+  } catch (err) {
+    console.error("Turnstile verification error:", err.message);
+    return false;
+  }
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -42,7 +70,24 @@ app.get("/health", (_req, res) => {
 });
 
 app.post("/api/contact", contactLimiter, async (req, res) => {
-  const { name, email, message } = req.body;
+  const { name, email, message, turnstileToken } = req.body;
+
+  // ── Turnstile CAPTCHA verification ──────────────────────────────────────────
+  if (!turnstileToken) {
+    return res.status(400).json({
+      success: false,
+      message: "CAPTCHA verification is required.",
+    });
+  }
+
+  const remoteip = req.ip;
+  const captchaValid = await verifyTurnstileToken(turnstileToken, remoteip);
+  if (!captchaValid) {
+    return res.status(403).json({
+      success: false,
+      message: "CAPTCHA verification failed. Please try again.",
+    });
+  }
 
   // Basic validation
   if (!name || !email || !message) {
